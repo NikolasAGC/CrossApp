@@ -535,37 +535,37 @@ export function handleImportPRs(jsonString) {
  */
 function exposeDebugAPIs() {
   window.__APP__ = {
-    // State
+    // ===== STATE =====
     getState,
     debugState,
-
-    // PDF Multi-week
-    uploadMultiWeekPdf: handleMultiWeekPdfUpload,
-    selectWeek: selectActiveWeek,
-    getWeeks: () => getState().weeks,
+    getWeeks: () => getState().weeks || [],
     getActiveWeek: () => getState().activeWeekNumber,
 
-    // Workout
+    // ===== PDF =====
+    uploadMultiWeekPdf: handleMultiWeekPdfUpload,
+
+    // ===== SEMANA =====
+    selectWeek: selectActiveWeek,
+
+    // ===== WORKOUT =====
     copyWorkout: handleCopyWorkout,
     exportWorkout: handleExportWorkout,
 
-    // PRs
+    // ===== PRs =====
     addPR: handleAddPR,
     removePR: handleRemovePR,
     listPRs: handleListPRs,
     exportPRs: handleExportPRs,
     importPRs: handleImportPRs,
 
-    // Info
-    getPdfInfo,
-
-    // Events
+    // ===== EVENTS =====
     on,
-    emit,
+    emit
   };
 
   console.log('🐛 Debug APIs expostas: window.__APP__');
 }
+
 
 // ========== HELPERS ==========
 
