@@ -123,16 +123,56 @@ async function loadPersistedState() {
     console.warn('Erro ao carregar estado persistido:', error);
   }
 }
-
 /**
  * Atualiza dia atual no state
  */
-function updateCurrentDay() {
-  const dayName = getDayName();
+async function updateCurrentDay() {
+  // Verifica se há override manual
+  const dayOverrideStorage = createStorage('day-override', 100);
+  const customDay = await dayOverrideStorage.get('custom-day');
+  
+  const dayName = customDay || getDayName();
+  
   setState({ currentDay: dayName });
-  console.log(`📅 Dia atual: ${dayName}`);
+  
+  if (customDay) {
+    console.log(`📅 Dia atual: ${dayName} (manual)`);
+  } else {
+    console.log(`📅 Dia atual: ${dayName} (automático)`);
+  }
 }
 
+/**
+ * Permite usuário escolher dia manualmente
+ * @param {string} dayName - Nome do dia ('Segunda', 'Terça', etc)
+ * @returns {Object}
+
+/**
+ * Volta para dia automático (sistema)
+ * @returns {Promise<Object>}
+ */
+export async function resetToAutoDay() {
+  // Remove override
+  const prefsStorage = createStorage('day-override', 100);
+  await prefsStorage.remove('custom-day');
+  
+  // Volta para dia do sistema
+  const systemDay = getDayName();
+  setState({ currentDay: systemDay });
+  
+  // Reprocessa
+  const state = getState();
+  if (state.activeWeekNumber) {
+    const week = state.weeks?.find(w => w.weekNumber === state.activeWeekNumber);
+    if (week) {
+      await processWorkoutFromWeek(week);
+    }
+  }
+  
+  console.log(`📅 Voltou para dia automático: ${systemDay}`);
+  
+  return { success: true, day: systemDay };
+}
 /**
  * Carrega semanas do PDF (fluxo multi-week)
  */
@@ -256,16 +296,140 @@ export async function selectActiveWeek(weekNumber) {
 
   return { success: true };
 }
+/**
+ * Permite usuário escolher dia manualmente
+ * @param {string} dayName - Nome do dia ('Segunda', 'Terça', etc)
+ * @returns {Promise<Object>}
+ */
+export async function setCustomDay(dayName) {
+  const validDays = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+  
+  if (!validDays.includes(dayName)) {
+    return {
+      success: false,
+      error: `Dia inválido. Use: ${validDays.join(', ')}`,
+    };
+  }
+  
+  // Atualiza state
+  setState({ currentDay: dayName });
+  
+  // Salva preferência (para persistir após reload)
+  const dayOverrideStorage = createStorage('day-override', 100);
+  await dayOverrideStorage.set('custom-day', dayName);
+  
+  // Reprocessa treino
+  const state = getState();
+  if (state.activeWeekNumber) {
+    const week = state.weeks?.find(w => w.weekNumber === state.activeWeekNumber);
+    if (week) {
+      await processWorkoutFromWeek(week);
+    }
+  }
+  
+  emit('day:changed', { dayName, manual: true });
+  
+  console.log(`📅 Dia alterado manualmente para: ${dayName}`);
+  
+  return { success: true, day: dayName };
+}
+/**
+ * Importar PRs de CSV
+ * @param {string} csvString - String CSV
+ * @param {boolean} merge - Se true, faz merge com PRs existentes
+ * @returns {Promise<Object>}
+ */
+export async function handleImportPRsFromCSV(csvString, merge = true) {
+  const { importPRsFromCSV } = await import('./core/usecases/importPRsFromCSV.js');
+  
+  const parseResult = importPRsFromCSV(csvString);
+  
+  if (!parseResult.success) {
+    return parseResult;
+  }
+  
+  const state = getState();
+  
+  let finalPRs;
+  if (merge) {
+    finalPRs = { ...state.prs, ...parseResult.data };
+  } else {
+    finalPRs = parseResult.data;
+  }
+  
+  setState({ prs: finalPRs });
+  
+  emit('prs:imported', {
+    imported: parseResult.imported,
+    total: Object.keys(finalPRs).length,
+    format: 'CSV',
+  });
+  
+  console.log(`📥 PRs importados do CSV: ${parseResult.imported} exercícios`);
+  
+  if (parseResult.errors) {
+    console.warn('⚠️ Avisos:', parseResult.errors);
+  }
+  
+  return {
+    success: true,
+    imported: parseResult.imported,
+    skipped: parseResult.skipped,
+    total: Object.keys(finalPRs).length,
+    errors: parseResult.errors,
+  };
+}
+
+/**
+ * Exportar PRs para CSV
+ * @returns {Promise<Object>}
+ */
+export async function handleExportPRsToCSV() {
+  const { exportPRsToCSV } = await import('./core/usecases/importPRsFromCSV.js');
+  
+  const state = getState();
+  const result = exportPRsToCSV(state.prs);
+  
+  if (!result.success) {
+    return result;
+  }
+  
+  downloadFile(result.csv, result.filename, 'text/csv');
+  
+  emit('prs:exported', { count: result.count, format: 'CSV' });
+  
+  console.log('💾 PRs exportados (CSV):', result.filename);
+  
+  return { success: true, filename: result.filename };
+}
+
+/**
+ * Download de template CSV
+ * @returns {Promise<Object>}
+ */
+export async function downloadPRsTemplate() {
+  const { getCSVTemplate } = await import('./core/usecases/importPRsFromCSV.js');
+  
+  const template = getCSVTemplate();
+  downloadFile(template, 'prs-template.csv', 'text/csv');
+  
+  console.log('📥 Template CSV baixado');
+  
+  return { success: true };
+}
 
 /**
  * Processa treino do dia de uma semana específica
  * @param {Object} week - Semana parseada
  */
+// ✅ VERSÃO CORRETA (usa state.currentDay):
 async function processWorkoutFromWeek(week) {
   const state = getState();
   const dayName = state.currentDay;
 
-  if (isRestDay()) {
+  // Verifica se é domingo (descanso)
+  // AGORA USA state.currentDay em vez de isRestDay()
+  if (dayName === 'Domingo') {  // ✅ CORRETO
     setState({
       workout: null,
       ui: { activeScreen: 'rest' },
@@ -285,11 +449,9 @@ async function processWorkoutFromWeek(week) {
     return;
   }
 
-  // Calcula cargas (adaptar se estrutura de workout mudar)
+  // Calcula cargas
   let hasWarnings = false;
   
-  // workout tem estrutura: { day, blocks: [{ type, lines }] }
-  // Precisamos adaptar para o calculateLoads que espera { sections }
   const workoutForCalc = {
     day: workout.day,
     sections: workout.blocks || [],
@@ -318,6 +480,7 @@ async function processWorkoutFromWeek(week) {
 
   emit('workout:loaded', { workout, week: week.weekNumber });
 }
+
 
 // ========== PUBLIC ACTIONS ==========
 
@@ -552,6 +715,53 @@ export function handleImportPRs(jsonString) {
 
   return { success: true };
 }
+/**
+ * Carrega PRs padrão do arquivo
+ * @param {boolean} merge - Se true, faz merge com PRs existentes
+ * @returns {Promise<Object>}
+ */
+export async function loadDefaultPRs(merge = true) {
+  try {
+    const { getDefaultPRs } = await import('./data/prs.js');
+    const defaultPRs = getDefaultPRs();
+    
+    const state = getState();
+    
+    let finalPRs;
+    if (merge) {
+      // Merge: mantém PRs existentes, adiciona apenas novos
+      finalPRs = { ...defaultPRs, ...state.prs };
+    } else {
+      // Substitui completamente
+      finalPRs = defaultPRs;
+    }
+    
+    setState({ prs: finalPRs });
+    
+    const added = Object.keys(finalPRs).length - Object.keys(state.prs).length;
+    
+    emit('prs:loaded', { 
+      total: Object.keys(finalPRs).length,
+      added: added,
+      merged: merge 
+    });
+    
+    console.log(`📥 PRs padrão carregados: ${Object.keys(finalPRs).length} exercícios${merge ? ` (+${added} novos)` : ''}`);
+    
+    return {
+      success: true,
+      total: Object.keys(finalPRs).length,
+      added: added,
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Erro ao carregar PRs padrão: ' + error.message,
+    };
+  }
+}
+
 
 // ========== DEBUG APIs ==========
 
@@ -560,36 +770,50 @@ export function handleImportPRs(jsonString) {
  */
 function exposeDebugAPIs() {
   window.__APP__ = {
-    // ===== STATE =====
+    // State
     getState,
     debugState,
-    getWeeks: () => getState().weeks || [],
+
+    // PDF Multi-week
+    uploadMultiWeekPdf: handleMultiWeekPdfUpload,
+    selectWeek: selectActiveWeek,
+    getWeeks: () => getState().weeks,
     getActiveWeek: () => getState().activeWeekNumber,
 
-    // ===== PDF =====
-    uploadMultiWeekPdf: handleMultiWeekPdfUpload,
+    // Controle de dia
+    setDay: setCustomDay,
+    resetDay: resetToAutoDay,
+    getCurrentDay: () => getState().currentDay,
 
-    // ===== SEMANA =====
-    selectWeek: selectActiveWeek,
-
-    // ===== WORKOUT =====
+    // Workout
     copyWorkout: handleCopyWorkout,
     exportWorkout: handleExportWorkout,
 
-    // ===== PRs =====
+    // PRs
     addPR: handleAddPR,
     removePR: handleRemovePR,
     listPRs: handleListPRs,
-    exportPRs: handleExportPRs,
-    importPRs: handleImportPRs,
+    
+    // PRs - Import/Export
+    exportPRs: handleExportPRs,                    // JSON
+    importPRs: handleImportPRs,                    // JSON
+    exportPRsCSV: handleExportPRsToCSV,            // CSV (NOVO)
+    importPRsCSV: handleImportPRsFromCSV,          // CSV (NOVO)
+    loadDefaultPRs: loadDefaultPRs,                // Do arquivo prs.js (NOVO)
+    downloadPRsTemplate: downloadPRsTemplate,      // Template CSV (NOVO)
 
-    // ===== EVENTS =====
+    // Info
+    getPdfInfo,
+
+    // Events
     on,
-    emit
+    emit,
   };
 
   console.log('🐛 Debug APIs expostas: window.__APP__');
 }
+
+
 
 
 // ========== HELPERS ==========
