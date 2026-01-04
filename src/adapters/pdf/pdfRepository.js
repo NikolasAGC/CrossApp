@@ -223,3 +223,126 @@ export async function updatePdf(file) {
   // Salva novo
   return await savePdf(file);
 }
+import { parseMultiWeekPdf, validateCustomPdfFormat, detectWeekNumbers } from './customPdfParser.js';
+
+/**
+ * Salva PDF com suporte a múltiplas semanas
+ * @param {File} file - Arquivo PDF
+ * @returns {Promise<Object>}
+ */
+export async function saveMultiWeekPdf(file) {
+  const validation = validatePdfFile(file);
+  
+  if (!validation.valid) {
+    return {
+      success: false,
+      error: validation.error,
+    };
+  }
+  
+  try {
+    const rawText = await extractTextFromFile(file);
+    
+    if (!rawText || rawText.length < 50) {
+      return {
+        success: false,
+        error: 'PDF vazio ou com muito pouco texto',
+      };
+    }
+    
+    const cleanedText = cleanPdfText(rawText);
+    
+    // Valida formato específico
+    const formatValidation = validateCustomPdfFormat(cleanedText);
+    
+    if (!formatValidation.valid) {
+      return {
+        success: false,
+        error: formatValidation.error,
+      };
+    }
+    
+    // Parse de múltiplas semanas
+    const parsedWeeks = parseMultiWeekPdf(cleanedText);
+    
+    // Escolhe storage apropriado
+    const storage = createStorage('multi-week-pdf', cleanedText.length);
+    
+    // Salva texto bruto
+    await storage.set('multi-week-pdf-text', cleanedText);
+    
+    // Salva semanas parseadas
+    await storage.set('multi-week-pdf-parsed', parsedWeeks);
+    
+    // Salva metadados
+    const metadata = {
+      uploadedAt: getTimestamp(),
+      fileName: file.name,
+      fileSize: file.size,
+      textLength: cleanedText.length,
+      weekNumbers: formatValidation.weekNumbers,
+      weeksCount: formatValidation.weeksCount,
+    };
+    
+    const metaStorage = createStorage('multi-week-metadata', 1000);
+    await metaStorage.set('multi-week-metadata', metadata);
+    
+    console.log('✅ PDF multi-semana salvo:', {
+      file: file.name,
+      weeks: formatValidation.weekNumbers,
+      storage: storage.getInfo().name,
+    });
+    
+    return {
+      success: true,
+      data: {
+        text: cleanedText,
+        parsedWeeks: parsedWeeks,
+        metadata: metadata,
+      },
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Erro ao processar PDF: ' + error.message,
+    };
+  }
+}
+
+/**
+ * Carrega semanas parseadas
+ * @returns {Promise<Object>}
+ */
+export async function loadParsedWeeks() {
+  try {
+    const storage = createStorage('multi-week-pdf-parsed', 0);
+    const parsedWeeks = await storage.get('multi-week-pdf-parsed');
+    
+    if (!parsedWeeks) {
+      return {
+        success: false,
+        error: 'Nenhuma semana salva',
+        data: null,
+      };
+    }
+    
+    const metaStorage = createStorage('multi-week-metadata', 0);
+    const metadata = await metaStorage.get('multi-week-metadata');
+    
+    return {
+      success: true,
+      data: {
+        weeks: parsedWeeks,
+        metadata: metadata || null,
+      },
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Erro ao carregar semanas: ' + error.message,
+      data: null,
+    };
+  }
+}

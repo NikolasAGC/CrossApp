@@ -1,72 +1,69 @@
+/**
+ * State Management (Store)
+ * Gerenciamento de estado global reativo
+ */
+
 let state = {
   // PDF e treinos
-  pdfText: null,                    // Texto bruto do PDF
-  currentWeek: 1,                   // Semana ativa (futuro: múltiplas semanas)
+  weeks: [],                        // Array de semanas parseadas
+  activeWeekNumber: null,           // Número da semana ativa
   currentDay: null,                 // Nome do dia (Segunda, Terça, etc)
-  workout: null,                    // Treino parseado do PDF
+  workout: null,                    // Treino do dia atual
   
   // PRs (Personal Records)
-  prs: {},                          // { "BACK SQUAT": 100, "DEADLIFT": 140, ... }
+  prs: {},                          // { "BACK SQUAT": 100, ... }
   
   // Preferências do usuário
   preferences: {
-    showLbsConversion: true,        // Mostra conversão kg → lbs
-    showEmojis: true,               // Mostra emojis nos títulos
-    showGoals: true,                // Mostra objetivos do WOD
-    theme: 'dark',                  // 'dark' | 'light'
+    showLbsConversion: true,
+    showEmojis: true,
+    showGoals: true,
+    theme: 'dark',
   },
   
   // Estado da UI (volatile)
   ui: {
     activeScreen: 'welcome',        // 'welcome' | 'workout' | 'rest'
-    hasWarnings: false,             // Se há exercícios sem PR
-    isLoading: false,               // Loading state
-    activeModal: null,              // 'prs' | 'settings' | 'raw' | null
+    hasWarnings: false,
+    isLoading: false,
+    activeModal: null,
   },
 };
 
-// Listeners (observers)
-const listeners = new Set();
+// Subscribers (listeners de mudança de estado)
+const subscribers = [];
 
 /**
- * Retorna o estado atual (read-only)
+ * Retorna estado completo (imutável)
+ * @returns {Object} Estado
  */
 export function getState() {
-  return state;
+  return structuredClone(state);
 }
 
 /**
- * Atualiza o estado (imutável) e notifica listeners
- * @param {Object} updates - Objeto com atualizações parciais
+ * Atualiza estado (parcial merge)
+ * @param {Object} updates - Atualizações parciais
  */
 export function setState(updates) {
-  const oldState = state;
+  const oldState = structuredClone(state);
   
-  // Merge profundo manual (evita lodash)
-  state = {
-    ...oldState,
-    ...updates,
-    preferences: {
-      ...oldState.preferences,
-      ...(updates.preferences || {}),
-    },
-    ui: {
-      ...oldState.ui,
-      ...(updates.ui || {}),
-    },
-  };
+  // Merge profundo
+  state = deepMerge(state, updates);
   
-  // Notifica todos os listeners
-  notify(state, oldState);
+  // Notifica subscribers
+  notifySubscribers(state, oldState);
 }
 
 /**
- * Reseta o estado (útil para logout ou clear data)
+ * Reseta estado para valores iniciais
  */
 export function resetState() {
+  const oldState = structuredClone(state);
+  
   state = {
-    pdfText: null,
-    currentWeek: 1,
+    weeks: [],
+    activeWeekNumber: null,
     currentDay: null,
     workout: null,
     prs: {},
@@ -84,51 +81,108 @@ export function resetState() {
     },
   };
   
-  notify(state, {});
+  notifySubscribers(state, oldState);
 }
 
 /**
- * Registra um listener (observer)
- * @param {Function} fn - Callback (newState, oldState) => void
- * @returns {Function} Unsubscribe function
+ * Subscreve a mudanças de estado
+ * @param {Function} callback - Função chamada quando state mudar
+ * @returns {Function} Função para cancelar subscription
  */
-export function subscribe(fn) {
-  listeners.add(fn);
+export function subscribe(callback) {
+  if (typeof callback !== 'function') {
+    throw new Error('Callback deve ser uma função');
+  }
   
-  // Retorna função de cleanup
-  return () => listeners.delete(fn);
+  subscribers.push(callback);
+  
+  // Retorna unsubscribe function
+  return () => {
+    const index = subscribers.indexOf(callback);
+    if (index > -1) {
+      subscribers.splice(index, 1);
+    }
+  };
 }
 
 /**
- * Notifica todos os listeners
- * @private
+ * Notifica todos os subscribers
+ * @param {Object} newState - Novo estado
+ * @param {Object} oldState - Estado anterior
  */
-function notify(newState, oldState) {
-  listeners.forEach(fn => {
+function notifySubscribers(newState, oldState) {
+  subscribers.forEach(callback => {
     try {
-      fn(newState, oldState);
+      callback(structuredClone(newState), structuredClone(oldState));
     } catch (error) {
-      console.error('Erro no listener:', error);
+      console.error('Erro em subscriber:', error);
     }
   });
 }
 
 /**
- * Debug: exibe estado no console
+ * Merge profundo de objetos
+ * @param {Object} target - Objeto alvo
+ * @param {Object} source - Objeto fonte
+ * @returns {Object} Objeto merged
  */
-export function debugState() {
-  console.group('📊 Estado Atual');
-  console.log('PDF carregado:', !!state.pdfText);
-  console.log('Dia atual:', state.currentDay);
-  console.log('Semana ativa:', state.currentWeek);
-  console.log('PRs cadastrados:', Object.keys(state.prs).length);
-  console.log('Tela ativa:', state.ui.activeScreen);
-  console.log('Preferências:', state.preferences);
-  console.groupEnd();
-  return state;
+function deepMerge(target, source) {
+  const output = { ...target };
+  
+  Object.keys(source).forEach(key => {
+    if (isObject(source[key])) {
+      if (key in target) {
+        output[key] = deepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    } else {
+      output[key] = source[key];
+    }
+  });
+  
+  return output;
 }
 
-// Expõe globalmente para debug no console
-if (typeof window !== 'undefined') {
-  window.__STATE__ = { getState, setState, debugState };
+/**
+ * Verifica se valor é objeto
+ * @param {*} item - Valor
+ * @returns {boolean}
+ */
+function isObject(item) {
+  return item && typeof item === 'object' && !Array.isArray(item);
+}
+
+/**
+ * Debug: imprime estado no console
+ */
+export function debugState() {
+  console.log('🔍 Estado atual:');
+  console.table({
+    'Semanas carregadas': state.weeks?.length || 0,
+    'Semana ativa': state.activeWeekNumber || 'Nenhuma',
+    'Dia atual': state.currentDay || 'Não definido',
+    'Treino carregado': state.workout ? `${state.workout.day} (${state.workout.blocks?.length || 0} blocos)` : 'Não',
+    'PRs cadastrados': Object.keys(state.prs).length,
+    'Tela ativa': state.ui.activeScreen,
+    'Warnings': state.ui.hasWarnings ? 'Sim' : 'Não',
+  });
+  
+  console.log('📦 Estado completo:', state);
+  
+  if (state.weeks && state.weeks.length > 0) {
+    console.log('📅 Semanas disponíveis:', state.weeks.map(w => w.weekNumber));
+  }
+  
+  if (Object.keys(state.prs).length > 0) {
+    console.log('💪 PRs:', state.prs);
+  }
+}
+
+/**
+ * Debug: retorna total de subscribers
+ * @returns {number}
+ */
+export function getSubscribersCount() {
+  return subscribers.length;
 }
