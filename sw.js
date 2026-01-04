@@ -4,69 +4,40 @@
  */
 
 const CACHE_NAME = 'treino-v2';
+
+// Lista APENAS arquivos essenciais que sabemos que existem
 const ASSETS = [
   './',
   './index.html',
-  './manifest.json',
   './src/main.js',
   './src/app.js',
-  
-  // Core - State
-  './src/core/state/store.js',
-  './src/core/state/selectors.js',
-  
-  // Core - Events
-  './src/core/events/eventBus.js',
-  
-  // Core - Utils
-  './src/core/utils/date.js',
-  './src/core/utils/text.js',
-  './src/core/utils/math.js',
-  './src/core/utils/validators.js',
-  
-  // Core - Services
-  './src/core/services/prsService.js',
-  './src/core/services/loadCalculator.js',
-  './src/core/services/workoutService.js',
-  './src/core/services/weekService.js',
-  
-  // Core - Use-cases
-  './src/core/usecases/calculateLoads.js',
-  './src/core/usecases/copyWorkout.js',
-  './src/core/usecases/exportWorkout.js',
-  './src/core/usecases/managePRs.js',
-  './src/core/usecases/exportPRs.js',
-  './src/core/usecases/importPRs.js',
-  './src/core/usecases/selectWeek.js',
-  
-  // Adapters - Storage
-  './src/adapters/storage/localStorageAdapter.js',
-  './src/adapters/storage/indexedDbAdapter.js',
-  './src/adapters/storage/storageFactory.js',
-  
-  // Adapters - PDF
-  './src/adapters/pdf/pdfReader.js',
-  './src/adapters/pdf/pdfParser.js',
-  './src/adapters/pdf/customPdfParser.js',
-  './src/adapters/pdf/pdfRepository.js',
 ];
 
-// Install: cacheia assets
+// Install: tenta cachear, mas não falha se algum arquivo não existir
 self.addEventListener('install', event => {
   console.log('⚙️ Service Worker: Installing...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('📦 Service Worker: Caching assets...');
-        return cache.addAll(ASSETS);
+        console.log('📦 Service Worker: Caching core assets...');
+        
+        // Cacheia arquivos um por um, ignorando falhas
+        return Promise.allSettled(
+          ASSETS.map(url => 
+            cache.add(url).catch(err => {
+              console.warn('⚠️ Falha ao cachear:', url);
+              return null;
+            })
+          )
+        );
       })
       .then(() => {
-        console.log('✅ Service Worker: Assets cached');
+        console.log('✅ Service Worker: Core assets cached');
         return self.skipWaiting();
       })
       .catch(error => {
-        console.error('❌ Service Worker: Cache failed', error);
+        console.error('❌ Service Worker: Install failed', error);
       })
   );
 });
@@ -94,59 +65,77 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fetch: Network First (com fallback para cache)
+// Fetch: Network First com fallback para cache
 self.addEventListener('fetch', event => {
   // Ignora requests não-GET
   if (event.request.method !== 'GET') {
     return;
   }
   
-  // Ignora chrome-extension e outras URLs especiais
+  // Ignora URLs especiais
   if (!event.request.url.startsWith('http')) {
+    return;
+  }
+  
+  // Ignora PDF.js CDN (sempre buscar da rede)
+  if (event.request.url.includes('cdnjs.cloudflare.com')) {
     return;
   }
   
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Se resposta OK, atualiza cache
-        if (response && response.status === 200) {
+        // Se resposta OK, atualiza cache em background
+        if (response && response.status === 200 && response.type === 'basic') {
           const responseClone = response.clone();
           
           caches.open(CACHE_NAME)
             .then(cache => {
               cache.put(event.request, responseClone);
+            })
+            .catch(() => {
+              // Ignora erros de cache
             });
         }
         
         return response;
       })
       .catch(() => {
-        // Se network falhar, busca no cache
+        // Network falhou, busca no cache
         return caches.match(event.request)
           .then(cachedResponse => {
             if (cachedResponse) {
+              console.log('📦 Servindo do cache:', event.request.url);
               return cachedResponse;
             }
             
-            // Se não tem cache, retorna página offline genérica
+            // Se é navegação e não tem cache, retorna index.html
             if (event.request.mode === 'navigate') {
               return caches.match('./index.html');
             }
             
-            return new Response('Offline', {
+            // Retorna resposta offline genérica
+            return new Response('Offline - Conteúdo não disponível', {
               status: 503,
-              statusText: 'Service Unavailable'
+              statusText: 'Service Unavailable',
+              headers: new Headers({
+                'Content-Type': 'text/plain'
+              })
             });
           });
       })
   );
 });
 
-// Message: permite skip waiting via postMessage
+// Message: permite controle via postMessage
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     console.log('⏭️ Service Worker: Skipping waiting...');
     self.skipWaiting();
+  }
+  
+  if (event.data && event.data.type === 'CLEAR_CACHE') {
+    console.log('🗑️ Service Worker: Clearing cache...');
+    caches.delete(CACHE_NAME);
   }
 });

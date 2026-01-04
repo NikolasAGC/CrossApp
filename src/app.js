@@ -159,34 +159,54 @@ async function loadSavedWeeks() {
 /**
  * Setup de event listeners
  */
+/**
+ * Setup de event listeners
+ */
+/**
+ * Setup de event listeners
+ */
+/**
+ * Setup de event listeners
+ */
+/**
+ * Setup de event listeners
+ */
 function setupEventListeners() {
-  // Listener: Salvar PRs quando state mudar
+  let prsSaveTimeout = null;
+  let prefsSaveTimeout = null;
+  let isProcessing = false; // Flag global para evitar loops
+  
+  // Listener: Salvar PRs quando state mudar (com debounce)
   subscribe((newState, oldState) => {
+    if (isProcessing) return;
+    
     if (newState.prs !== oldState.prs) {
-      savePRsToStorage(newState.prs);
+      clearTimeout(prsSaveTimeout);
+      prsSaveTimeout = setTimeout(() => {
+        savePRsToStorage(newState.prs);
+      }, 500);
     }
   });
-
-  // Listener: Salvar preferências quando mudarem
+  
+  // Listener: Salvar preferências quando mudarem (com debounce)
   subscribe((newState, oldState) => {
+    if (isProcessing) return;
+    
     if (newState.preferences !== oldState.preferences) {
-      savePreferencesToStorage(newState.preferences);
+      clearTimeout(prefsSaveTimeout);
+      prefsSaveTimeout = setTimeout(() => {
+        savePreferencesToStorage(newState.preferences);
+      }, 500);
     }
   });
-
-  // Listener: Reprocessar treino quando PRs mudarem
-  subscribe((newState, oldState) => {
-    if (newState.prs !== oldState.prs && newState.activeWeekNumber) {
-      const week = newState.weeks?.find(w => w.weekNumber === newState.activeWeekNumber);
-      if (week) {
-        processWorkoutFromWeek(week);
-      }
-    }
-  });
-
+  
   console.log('🎧 Event listeners configurados');
 }
 
+/**
+ * Processa treino do dia de uma semana específica
+ * @param {Object} week - Semana parseada
+ */
 /**
  * Salva PRs no storage
  */

@@ -5,7 +5,7 @@
 
 import { createStorage } from '../storage/storageFactory.js';
 import { extractTextFromFile, validatePdfFile, extractMetadata } from './pdfReader.js';
-import { cleanPdfText, validateWorkoutText } from './pdfParser.js';
+import { cleanPdfText } from './pdfParser.js';
 import { getTimestamp } from '../../core/utils/date.js';
 
 const PDF_KEY = 'workout-pdf';
@@ -229,6 +229,10 @@ import { parseMultiWeekPdf, validateCustomPdfFormat, detectWeekNumbers } from '.
  * Salva PDF com suporte a múltiplas semanas
  * @param {File} file - Arquivo PDF
  * @returns {Promise<Object>}
+/**
+ * Salva PDF com suporte a múltiplas semanas
+ * @param {File} file - Arquivo PDF
+ * @returns {Promise<Object>}
  */
 export async function saveMultiWeekPdf(file) {
   const validation = validatePdfFile(file);
@@ -243,6 +247,9 @@ export async function saveMultiWeekPdf(file) {
   try {
     const rawText = await extractTextFromFile(file);
     
+    console.log('📝 Texto bruto extraído:', rawText.length, 'chars');
+    console.log('📝 Primeiros 200 chars:', rawText.substring(0, 200));
+    
     if (!rawText || rawText.length < 50) {
       return {
         success: false,
@@ -251,6 +258,71 @@ export async function saveMultiWeekPdf(file) {
     }
     
     const cleanedText = cleanPdfText(rawText);
+    
+    console.log('🧹 Texto limpo:', cleanedText.length, 'chars');
+    console.log('🧹 Primeiros 200 chars:', cleanedText.substring(0, 200));
+    
+    // VERIFICAÇÃO CRÍTICA
+    if (!cleanedText || cleanedText.length < 50) {
+      console.error('❌ cleanPdfText retornou vazio!');
+      console.error('Texto bruto tinha:', rawText.length, 'chars');
+      
+      // FALLBACK: usa texto bruto se limpeza falhar
+      console.warn('⚠️ Usando texto bruto (pulando limpeza)');
+      const textToUse = rawText;
+      
+      // Valida formato específico
+      const formatValidation = validateCustomPdfFormat(textToUse);
+      
+      if (!formatValidation.valid) {
+        return {
+          success: false,
+          error: formatValidation.error,
+        };
+      }
+      
+      // Parse de múltiplas semanas
+      const parsedWeeks = parseMultiWeekPdf(textToUse);
+      
+      console.log('📦 Semanas parseadas:', parsedWeeks.length);
+      
+      // Escolhe storage apropriado
+      const storage = createStorage('multi-week-pdf', textToUse.length);
+      
+      // Salva texto bruto
+      await storage.set('multi-week-pdf-text', textToUse);
+      
+      // Salva semanas parseadas
+      await storage.set('multi-week-pdf-parsed', parsedWeeks);
+      
+      // Salva metadados
+      const metadata = {
+        uploadedAt: getTimestamp(),
+        fileName: file.name,
+        fileSize: file.size,
+        textLength: textToUse.length,
+        weekNumbers: formatValidation.weekNumbers,
+        weeksCount: formatValidation.weeksCount,
+      };
+      
+      const metaStorage = createStorage('multi-week-metadata', 1000);
+      await metaStorage.set('multi-week-metadata', metadata);
+      
+      console.log('✅ PDF multi-semana salvo:', {
+        file: file.name,
+        weeks: formatValidation.weekNumbers,
+        storage: storage.getInfo().name,
+      });
+      
+      return {
+        success: true,
+        data: {
+          text: textToUse,
+          parsedWeeks: parsedWeeks,
+          metadata: metadata,
+        },
+      };
+    }
     
     // Valida formato específico
     const formatValidation = validateCustomPdfFormat(cleanedText);
@@ -303,12 +375,14 @@ export async function saveMultiWeekPdf(file) {
     };
     
   } catch (error) {
+    console.error('❌ Erro completo:', error);
     return {
       success: false,
       error: 'Erro ao processar PDF: ' + error.message,
     };
   }
 }
+
 
 /**
  * Carrega semanas parseadas

@@ -17,6 +17,16 @@ export function isPdfJsAvailable() {
  * @param {File} file - Arquivo PDF
  * @returns {Promise<string>} Texto extraído
  */
+/**
+ * Extrai texto completo de um arquivo PDF
+ * @param {File} file - Arquivo PDF
+ * @returns {Promise<string>} Texto extraído
+ */
+/**
+ * Extrai texto completo de um arquivo PDF
+ * @param {File} file - Arquivo PDF
+ * @returns {Promise<string>} Texto extraído
+ */
 export async function extractTextFromFile(file) {
   if (!file) {
     throw new Error('Arquivo não fornecido');
@@ -37,7 +47,7 @@ export async function extractTextFromFile(file) {
     // Carrega PDF
     const pdf = await window.pdfjsLib.getDocument({
       data: arrayBuffer,
-      verbosity: 0, // Silencia logs
+      verbosity: 0,
     }).promise;
     
     const totalPages = pdf.numPages;
@@ -56,7 +66,20 @@ export async function extractTextFromFile(file) {
       fullText += pageText + '\n';
     }
     
-    return fullText.trim();
+    let trimmedText = fullText.trim();
+    
+    // CORREÇÃO CRÍTICA: Substitui espaços duplos por quebras de linha
+    // PDFs do tipo "SEMANA 19  SEGUNDA  WOD" precisam virar linhas separadas
+    trimmedText = trimmedText.replace(/\s{2,}/g, '\n');
+    
+    // VALIDAÇÃO: texto não pode estar vazio
+    if (!trimmedText || trimmedText.length < 10) {
+      throw new Error('PDF vazio ou texto não extraído');
+    }
+    
+    console.log('✅ Texto extraído:', trimmedText.length, 'caracteres');
+    
+    return trimmedText;
     
   } catch (error) {
     if (error.message.includes('Invalid PDF')) {
@@ -70,7 +93,6 @@ export async function extractTextFromFile(file) {
     throw new Error('Erro ao ler PDF: ' + error.message);
   }
 }
-
 /**
  * Lê arquivo como ArrayBuffer
  * @param {File} file - Arquivo
