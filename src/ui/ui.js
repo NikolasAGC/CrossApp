@@ -2,6 +2,12 @@ import { renderAppShell, renderAll } from './render.js';
 import { setupActions } from './actions.js';
 import { bindAppEvents } from './events.js';
 
+/**
+ * UI plugável.
+ * - Não inicializa app
+ * - Não conhece core/store
+ * - Consome apenas window.__APP__ (getState, on, actions)
+ */
 export function mountUI({ root }) {
   if (!root) throw new Error('mountUI: root é obrigatório');
 
@@ -13,13 +19,17 @@ export function mountUI({ root }) {
   const subtitleEl = root.querySelector('#ui-subtitle');
   const weekBadgeEl = root.querySelector('#ui-weekBadge');
   const dayBadgeEl = root.querySelector('#ui-dayBadge');
+  const warnBadgeEl = root.querySelector('#ui-warnBadge');
   const weekChipsEl = root.querySelector('#ui-weekChips');
   const mainEl = root.querySelector('#ui-main');
   const stateEl = root.querySelector('#ui-state');
   const eventsEl = root.querySelector('#ui-events');
 
-  const { toast } = ensureToast();
+  const prsTableEl = root.querySelector('#ui-prsTable');
+  const prsCountEl = root.querySelector('#ui-prsCount');
+  const prsSearchEl = root.querySelector('#ui-prsSearch');
 
+  const { toast } = ensureToast();
   const pushEventLine = createEventLog(eventsEl);
 
   const rerender = () => {
@@ -30,25 +40,46 @@ export function mountUI({ root }) {
     weekBadgeEl.textContent = view.weekBadge;
     dayBadgeEl.textContent = view.dayBadge;
 
+    if (warnBadgeEl) warnBadgeEl.style.display = view.warnBadgeVisible ? '' : 'none';
+
     weekChipsEl.innerHTML = view.weekChipsHtml;
     mainEl.innerHTML = view.mainHtml;
     stateEl.innerHTML = view.stateHtml;
+
+    if (prsTableEl) prsTableEl.innerHTML = view.prsModalHtml;
+
+    if (prsCountEl) {
+      const count = Object.keys(state?.prs || {}).length;
+      prsCountEl.textContent = `${count} PRs`;
+    }
+
+    if (prsSearchEl) {
+      filterPrRows(root, prsSearchEl.value);
+    }
   };
 
-  setupActions({ root, toast, rerender });
-
-  bindAppEvents({
+  const destroyEvents = bindAppEvents({
     pushEventLine,
     rerender,
     toast,
   });
 
-  // Render inicial (sem assumir que app:ready foi emitido antes do mount)
+  setupActions({ root, toast, rerender });
+
   pushEventLine('UI montada');
   rerender();
 
-  // API mínima (opcional) para debug/manual refresh
-  return { rerender };
+  return {
+    rerender,
+    destroy() {
+      try {
+        destroyEvents?.();
+      } catch (e) {
+        console.warn('destroyEvents falhou', e);
+      }
+      // Não remove stylesheet/bg/toast por padrão (para evitar pisar no host).
+    },
+  };
 }
 
 function safeGetState() {
@@ -60,7 +91,7 @@ function safeGetState() {
 }
 
 function ensureStylesheet(href) {
-  const id = 'ui-styles-link';
+  const id = 'ui-styles';
   if (document.getElementById(id)) return;
 
   const link = document.createElement('link');
@@ -71,7 +102,7 @@ function ensureStylesheet(href) {
 }
 
 function ensureBg() {
-  // UI pode aplicar fundo sem tocar no index.html.
+  // UI pode aplicar fundo sem tocar no index.html
   document.documentElement.classList.add('ui-bg');
   document.body.classList.add('ui-bg');
 }
@@ -113,6 +144,22 @@ function createEventLog(containerEl) {
   };
 
   return push;
+}
+
+function filterPrRows(root, query) {
+  const q = String(query || '').trim().toUpperCase();
+  const rows = Array.from(root.querySelectorAll('tr[data-pr-row]'));
+
+  let visible = 0;
+  rows.forEach((row) => {
+    const key = (row.getAttribute('data-pr-row') || '').toUpperCase();
+    const show = !q || key.includes(q);
+    row.style.display = show ? '' : 'none';
+    if (show) visible += 1;
+  });
+
+  const countEl = root.querySelector('#ui-prsCount');
+  if (countEl) countEl.textContent = `${visible} PRs`;
 }
 
 function escapeHtml(str) {

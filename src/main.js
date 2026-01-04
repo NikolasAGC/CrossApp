@@ -1,57 +1,97 @@
 /**
  * Entry point da aplicação
- * Registra Service Worker e inicializa app
+ * - Registra Service Worker
+ * - Inicializa app (app.js)
+ * - Monta UI plugável (src/ui/ui.js)
+ *
+ * Obs: mantido compatível com window.__APP__ exposto pelo app.js. [file:8]
  */
 
 import { init } from './app.js';
 
-// Registra Service Worker (PWA)
-if ('serviceWorker' in navigator) {
+if (window.__TREINO_BOOTSTRAPPED__) {
+  // Evita double-boot caso o script seja incluído duas vezes acidentalmente.
+  console.warn('⚠️ Boot já executado. Ignorando reexecução do main.js.');
+} else {
+  window.__TREINO_BOOTSTRAPPED__ = true;
+  bootstrap();
+}
+
+async function bootstrap() {
+  registerServiceWorker();
+
+  const result = await init();
+  if (!result?.success) {
+    renderError(result?.error || 'Erro desconhecido');
+    return;
+  }
+
+  // Debug opcional (não interfere no uso normal):
+  // /?debug=1 mantém o painel antigo para inspeção rápida.
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('debug') === '1') {
+    renderDebugPlaceholder();
+    return;
+  }
+
+  await mountUI();
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('./sw.js')
-      .then(reg => console.log('✅ Service Worker registrado:', reg.scope))
-      .catch(err => console.error('❌ Erro no Service Worker:', err));
+      .then((reg) => console.log('✅ Service Worker registrado:', reg.scope))
+      .catch((err) => console.error('❌ Erro no Service Worker:', err));
   });
 }
 
-// Inicializa aplicação
-init().then(result => {
-  if (result.success) {
-    console.log('✅ App pronto para uso');
-    renderPlaceholder();
-  } else {
-    console.error('❌ Falha na inicialização:', result.error);
-    renderError(result.error);
+async function mountUI() {
+  const root = document.getElementById('app');
+  if (!root) {
+    console.error('Elemento #app não encontrado.');
+    return;
   }
-});
 
-/**
- * Renderiza placeholder enquanto UI não está pronta
- */
-function renderPlaceholder() {
-  const state = window.__APP__.getState();
-  
-  const appDiv = document.getElementById('app');
-  appDiv.innerHTML = `
-    <div style="padding: 2rem; font-family: system-ui; max-width: 800px; margin: 0 auto;">
-      <h1>✅ PWA Multi-Semana Pronto</h1>
-      
-      <div style="background: #f0f0f0; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-        <h2>📊 Estado Atual</h2>
-        <ul>
-          <li><strong>Dia:</strong> ${state.currentDay || 'Não definido'}</li>
-          <li><strong>Semanas carregadas:</strong> ${state.weeks?.length || 0}</li>
-          <li><strong>Semana ativa:</strong> ${state.activeWeekNumber || 'Nenhuma'}</li>
-          <li><strong>PRs cadastrados:</strong> ${Object.keys(state.prs).length}</li>
-          <li><strong>Tela ativa:</strong> ${state.ui.activeScreen}</li>
-          <li><strong>Treino:</strong> ${state.workout ? `✅ ${state.workout.day} (${state.workout.blocks?.length || 0} blocos)` : '⏳ Aguardando PDF'}</li>
+  // Garantia: app.js expõe __APP__ durante init().
+  if (!window.__APP__?.getState) {
+    console.warn('⚠️ window.__APP__ ainda não está disponível. Tentando novamente...');
+    await wait(0);
+  }
+
+  const { mountUI } = await import('./ui/ui.js');
+  mountUI({ root });
+}
+
+function renderDebugPlaceholder() {
+  const root = document.getElementById('app');
+  if (!root) return;
+
+  const state = safeGetState();
+
+  root.innerHTML = `
+    <div style="padding: 2rem; font-family: system-ui; max-width: 900px; margin: 0 auto;">
+      <h1 style="margin:0 0 1rem 0;">✅ PWA Multi-Semana Pronto (Debug)</h1>
+
+      <div style="background:#f0f0f0; padding:1.25rem; border-radius:10px; margin:1rem 0;">
+        <h2 style="margin:0 0 0.75rem 0;">📊 Estado Atual</h2>
+        <ul style="margin:0; padding-left: 1.1rem;">
+          <li><strong>Dia:</strong> ${escapeHtml(state.currentDay || '—')}</li>
+          <li><strong>Semanas carregadas:</strong> ${Number(state.weeks?.length || 0)}</li>
+          <li><strong>Semana ativa:</strong> ${escapeHtml(state.activeWeekNumber ?? 'Nenhuma')}</li>
+          <li><strong>PRs cadastrados:</strong> ${Object.keys(state.prs || {}).length}</li>
+          <li><strong>Tela ativa:</strong> ${escapeHtml(state.ui?.activeScreen || '—')}</li>
+          <li><strong>Treino:</strong> ${
+            state.workout ? escapeHtml(`${state.workout.day} (${state.workout.blocks?.length || 0} blocos)`) : '⏳ Aguardando PDF'
+          }</li>
         </ul>
       </div>
-      
-      <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-        <h2>🧪 Teste Multi-Semana no Console</h2>
-        <pre style="background: #fff; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.9rem;">
+
+      <div style="background:#e3f2fd; padding:1.25rem; border-radius:10px; margin:1rem 0;">
+        <h2 style="margin:0 0 0.75rem 0;">🧪 Teste Multi-Semana no Console</h2>
+        <pre style="background:#fff; padding:1rem; border-radius:8px; overflow:auto; font-size:0.9rem; line-height:1.4;">
 // 1. Ver estado completo
 __APP__.debugState()
 
@@ -87,103 +127,54 @@ __APP__.exportWorkout()
 
 // 8. Exportar/Importar PRs
 __APP__.exportPRs()
-
 const prsJson = '{"BACK SQUAT": 120, "DEADLIFT": 160}';
 __APP__.importPRs(prsJson);
 
 // 9. Info do PDF
 __APP__.getPdfInfo().then(info => console.log('PDF info:', info));
         </pre>
-      </div>
-      
-      <div style="background: #fff3cd; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-        <h2>⚡ Eventos em Tempo Real</h2>
-        <p>Escute eventos do sistema:</p>
-        <pre style="background: #fff; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.9rem;">
-__APP__.on('pdf:uploaded', (data) => {
-  console.log('PDF enviado:', data);
-});
-
-__APP__.on('week:changed', (data) => {
-  console.log('Semana mudou:', data.weekNumber);
-});
-
-__APP__.on('pr:updated', (data) => {
-  console.log('PR atualizado:', data.exercise, data.load);
-});
-
-__APP__.on('workout:loaded', (data) => {
-  console.log('Treino carregado:', data.workout.day, 'Semana:', data.week);
-});
-        </pre>
-      </div>
-      
-      <div style="margin-top: 2rem; padding: 1rem; background: #d4edda; border-radius: 8px;">
-        <p style="margin: 0;">
-          <strong>✅ Arquitetura limpa e funcional:</strong><br>
-          Multi-week parseado, persistência automática, event-driven.<br>
-          <strong>Próximo passo:</strong> UI de seleção de semana + renderização de treinos.
+        <p style="margin:0;color:#333;">
+          Dica: remova <code>?debug=1</code> da URL para voltar para a UI.
         </p>
       </div>
-      
-      ${renderWeeksDebug(state)}
     </div>
   `;
 }
 
-/**
- * Renderiza debug de semanas carregadas
- */
-function renderWeeksDebug(state) {
-  if (!state.weeks || state.weeks.length === 0) {
-    return '';
-  }
-  
-  const weeksHtml = state.weeks.map(week => {
-    const isActive = week.weekNumber === state.activeWeekNumber;
-    const days = week.workouts?.map(w => w.day).join(', ') || 'Nenhum';
-    
-    return `
-      <div style="padding: 0.5rem; background: ${isActive ? '#e8f5e9' : '#fff'}; border-left: 3px solid ${isActive ? '#4caf50' : '#ccc'}; margin-bottom: 0.5rem;">
-        <strong>Semana ${week.weekNumber}</strong> ${isActive ? '✅ ATIVA' : ''}
-        <br>
-        <small>Dias: ${days}</small>
-      </div>
-    `;
-  }).join('');
-  
-  return `
-    <div style="background: #f5f5f5; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-      <h2>📅 Semanas Carregadas</h2>
-      ${weeksHtml}
-    </div>
-  `;
-}
-
-/**
- * Renderiza erro de inicialização
- */
 function renderError(errorMsg) {
-  const appDiv = document.getElementById('app');
-  appDiv.innerHTML = `
-    <div style="padding: 2rem; font-family: system-ui; max-width: 600px; margin: 0 auto; text-align: center;">
-      <h1 style="color: #d32f2f;">❌ Erro ao Inicializar</h1>
-      <p style="background: #ffebee; padding: 1rem; border-radius: 8px; color: #d32f2f;">
-        ${errorMsg}
+  const root = document.getElementById('app');
+  if (!root) return;
+
+  root.innerHTML = `
+    <div style="padding: 2rem; font-family: system-ui; max-width: 720px; margin: 0 auto; text-align: center;">
+      <h1 style="color:#d32f2f; margin:0 0 0.75rem 0;">Erro ao Inicializar</h1>
+      <p style="background:#ffebee; padding:1rem; border-radius:10px; color:#b71c1c; margin:0 0 1rem 0;">
+        ${escapeHtml(errorMsg)}
       </p>
-      <button onclick="location.reload()" style="padding: 0.75rem 1.5rem; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
-        🔄 Recarregar Página
+      <button
+        onclick="location.reload()"
+        style="padding: 0.75rem 1.25rem; background:#1976d2; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:1rem;"
+      >
+        Recarregar
       </button>
-      
-      <div style="margin-top: 2rem; padding: 1rem; background: #fff3cd; border-radius: 8px; text-align: left;">
-        <h3>🔧 Possíveis soluções:</h3>
-        <ul style="text-align: left;">
-          <li>Verifique se o navegador suporta localStorage/IndexedDB</li>
-          <li>Limpe o cache do navegador</li>
-          <li>Verifique o console para mais detalhes</li>
-          <li>Tente usar modo anônimo para descartar extensões</li>
-        </ul>
-      </div>
     </div>
   `;
+}
+
+function safeGetState() {
+  try {
+    return window.__APP__?.getState ? window.__APP__.getState() : {};
+  } catch {
+    return {};
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = String(str ?? '');
+  return div.innerHTML;
+}
+
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }

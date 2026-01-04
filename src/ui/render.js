@@ -11,11 +11,14 @@ export function renderAppShell() {
           <div class="ui-badges">
             <span id="ui-weekBadge" class="ui-badge">Semana: —</span>
             <span id="ui-dayBadge" class="ui-badge">Dia: —</span>
+            <span id="ui-warnBadge" class="ui-badge ui-badgeWarn" style="display:none;">PRs pendentes</span>
           </div>
         </div>
 
         <div class="ui-actions">
-          <button class="ui-btn ui-btnPrimary" data-action="pdf:pick">Upload PDF (multi-semana)</button>
+          <button class="ui-btn ui-btnPrimary" data-action="pdf:pick" title="Carregar ou trocar PDF">
+            Carregar PDF
+          </button>
 
           <select class="ui-select" data-action="day:set" title="Escolher dia manualmente">
             <option value="">Dia (manual)…</option>
@@ -30,8 +33,8 @@ export function renderAppShell() {
 
           <button class="ui-btn" data-action="day:auto" title="Voltar para o dia do sistema">Auto</button>
           <button class="ui-btn ui-btnGood" data-action="workout:copy">Copiar</button>
-          <button class="ui-btn" data-action="workout:export">Exportar treino</button>
-          <button class="ui-btn" data-action="prs:export">Exportar PRs</button>
+          <button class="ui-btn" data-action="workout:export">Exportar</button>
+          <button class="ui-btn" data-action="prs:open">PRs</button>
         </div>
 
         <div id="ui-weekChips" class="ui-weekChips" aria-label="Seleção de semana"></div>
@@ -56,6 +59,8 @@ export function renderAppShell() {
           </div>
         </aside>
       </div>
+
+      ${renderPrsModal()}
     </div>
   `;
 }
@@ -66,6 +71,7 @@ export function renderAll(state) {
   const screen = state?.ui?.activeScreen || 'welcome';
   const weeks = normalizeWeeks(state?.weeks);
   const prsCount = state?.prs ? Object.keys(state.prs).length : 0;
+  const hasWarnings = !!state?.ui?.hasWarnings;
 
   const subtitle = buildSubtitle({ weeksCount: weeks.length, activeWeek, day, screen });
 
@@ -73,14 +79,16 @@ export function renderAll(state) {
     subtitle,
     weekBadge: `Semana: ${activeWeek}`,
     dayBadge: `Dia: ${day}`,
+    warnBadgeVisible: hasWarnings,
     weekChipsHtml: renderWeekChips({ weeks, activeWeek }),
     mainHtml: renderMain({ state, screen, weeks }),
     stateHtml: renderStatePanel({ day, prsCount, activeWeek, screen, weeksCount: weeks.length }),
+    prsModalHtml: renderPrsTable(state),
   };
 }
 
 function buildSubtitle({ weeksCount, activeWeek, day, screen }) {
-  if (!weeksCount) return 'Aguardando PDF multi-semana…';
+  if (!weeksCount) return 'Carregue um PDF para começar.';
   return `Semanas: ${weeksCount} • Semana ativa: ${activeWeek} • Dia: ${day} • Tela: ${screen}`;
 }
 
@@ -96,7 +104,7 @@ function normalizeWeeks(weeks) {
 }
 
 function renderWeekChips({ weeks, activeWeek }) {
-  if (!weeks.length) return `<span class="ui-muted">Semanas: nenhuma (faça upload do PDF)</span>`;
+  if (!weeks.length) return `<span class="ui-muted">Sem semanas carregadas.</span>`;
 
   return weeks
     .map((w) => {
@@ -129,11 +137,11 @@ function renderMain({ state, screen, weeks }) {
   if (!weeks.length) {
     return `
       <div class="ui-card">
-        <h3 class="ui-cardTitle">Upload do PDF</h3>
+        <h3 class="ui-cardTitle">Começar</h3>
         <p class="ui-muted" style="margin:0 0 10px 0;">
-          Envie um PDF com múltiplas semanas para carregar a seleção de semanas e o treino do dia.
+          Carregue um PDF. O sistema detecta semanas automaticamente e habilita o seletor.
         </p>
-        <button class="ui-btn ui-btnPrimary" data-action="pdf:pick">Selecionar PDF</button>
+        <button class="ui-btn ui-btnPrimary" data-action="pdf:pick">Carregar PDF</button>
       </div>
     `;
   }
@@ -143,9 +151,9 @@ function renderMain({ state, screen, weeks }) {
   if (!workout) {
     return `
       <div class="ui-card">
-        <h3 class="ui-cardTitle">Sem treino encontrado</h3>
+        <h3 class="ui-cardTitle">Nenhum treino encontrado</h3>
         <p class="ui-muted" style="margin:0;">
-          Nenhum treino para <strong>${escapeHtml(state?.currentDay || 'hoje')}</strong> na semana ativa.
+          Não há treino para <strong>${escapeHtml(state?.currentDay || 'hoje')}</strong> na semana ativa.
         </p>
       </div>
     `;
@@ -162,6 +170,7 @@ function renderMain({ state, screen, weeks }) {
         <span class="ui-kpi">Blocos: ${blocks.length}</span>
         <span class="ui-kpi">Semana ativa: ${escapeHtml(state?.activeWeekNumber ?? '—')}</span>
         <span class="ui-kpi">Avisos: ${hasWarnings ? '<span style="color:rgba(251,191,36,0.95)">sim</span>' : 'não'}</span>
+        <span class="ui-kpi"><button class="ui-btn" data-action="prs:open" style="padding:6px 10px; font-size:13px;">Editar PRs</button></span>
       </div>
 
       ${blocks.map(renderBlock).join('')}
@@ -241,6 +250,100 @@ function renderStatePanel({ day, prsCount, activeWeek, screen, weeksCount }) {
     <div>Semana ativa: <strong>${escapeHtml(activeWeek)}</strong></div>
     <div>PRs: <strong>${prsCount}</strong></div>
     <div>Tela: <strong>${escapeHtml(screen)}</strong></div>
+  `;
+}
+
+function renderPrsModal() {
+  return `
+    <div id="ui-prsModalBackdrop" class="ui-modalBackdrop" aria-hidden="true">
+      <div class="ui-modal" role="dialog" aria-modal="true" aria-labelledby="ui-prsModalTitle">
+        <div class="ui-modalHeader">
+          <h2 id="ui-prsModalTitle" class="ui-modalTitle">PRs</h2>
+          <div class="ui-tableActions">
+            <button class="ui-btn" data-action="prs:export">Exportar</button>
+            <button class="ui-btn" data-action="prs:import">Importar</button>
+            <button class="ui-btn" data-action="prs:close">Fechar</button>
+          </div>
+        </div>
+
+        <div class="ui-modalBody">
+          <div class="ui-formRow">
+            <input id="ui-prsNewName" class="ui-input" type="text" placeholder="Exercício (ex: BACK SQUAT)" />
+            <input id="ui-prsNewValue" class="ui-input" type="number" step="0.5" placeholder="PR (kg)" />
+            <button class="ui-btn ui-btnGood" data-action="prs:add">Adicionar</button>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+            <input id="ui-prsSearch" class="ui-input" type="search" placeholder="Buscar PR..." style="flex:1; min-width: 220px;" />
+            <span id="ui-prsCount" class="ui-pill">0 PRs</span>
+          </div>
+
+          <div class="ui-scrollArea">
+            <div id="ui-prsTable"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export function renderPrsTable(state) {
+  const prs = (state?.prs && typeof state.prs === 'object') ? state.prs : {};
+  const entries = Object.entries(prs)
+    .map(([name, value]) => [String(name), Number(value)])
+    .filter(([name, value]) => name.trim().length > 0 && Number.isFinite(value))
+    .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+
+  if (!entries.length) {
+    return `
+      <table class="ui-table">
+        <thead>
+          <tr>
+            <th style="width: 55%;">Exercício</th>
+            <th style="width: 25%;">PR (kg)</th>
+            <th style="width: 20%; text-align:right;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="3" class="ui-muted">Nenhum PR cadastrado.</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  }
+
+  const rows = entries.map(([name, value]) => {
+    const safe = escapeHtml(name);
+    return `
+      <tr data-pr-row="${safe}">
+        <td><strong>${safe}</strong></td>
+        <td>
+          <input class="ui-input" data-action="prs:editValue" data-exercise="${safe}" type="number" step="0.5" value="${escapeHtml(value)}" />
+        </td>
+        <td style="text-align:right;">
+          <div class="ui-tableActions">
+            <button class="ui-btn" data-action="prs:save" data-exercise="${safe}">Salvar</button>
+            <button class="ui-btn" data-action="prs:remove" data-exercise="${safe}">Remover</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th style="width: 55%;">Exercício</th>
+          <th style="width: 25%;">PR (kg)</th>
+          <th style="width: 20%; text-align:right;">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
   `;
 }
 
