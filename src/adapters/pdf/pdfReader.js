@@ -198,4 +198,4 @@ export function getInfo() {
     available: isPdfJsAvailable(),
     version: isPdfJsAvailable() ? window.pdfjsLib.version : 'N/A',
   };
-}
+};
