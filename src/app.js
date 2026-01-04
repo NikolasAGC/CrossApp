@@ -8,6 +8,11 @@
  * - Carregar dados persistidos
  * - Expor APIs para UI
  */
+// app.js
+import * as pdfjsLib from './libs/pdf.mjs';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  new URL('./libs/pdf.worker.mjs', import.meta.url).toString();
 
 console.log('📦 app.js carregado');
 
