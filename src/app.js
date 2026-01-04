@@ -78,7 +78,8 @@ export async function init() {
     return { success: false, error: error.message };
   }
 }
-
+import { mountUI } from './ui/ui.js';
+mountUI({ root: document.getElementById('app') });
 /**
  * Verifica se dependências necessárias estão disponíveis
  */
