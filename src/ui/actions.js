@@ -19,6 +19,18 @@ export function setupActions({ root, toast, rerender }) {
           return;
         }
 
+        case 'pdf:clear': {
+          const ok = confirm('⚠️ Limpar todos os PDFs salvos?\n\nIsso removerá todas as semanas carregadas. Esta ação não pode ser desfeita.');
+          if (!ok) return;
+
+          const result = await window.__APP__.clearAllPdfs();
+          if (!result?.success) throw new Error(result?.error || 'Falha ao limpar PDFs');
+
+          toast('Todos os PDFs removidos');
+          rerender();
+          return;
+        }
+
         case 'week:select': {
           const week = Number(el.dataset.week);
           if (!Number.isFinite(week)) return;
@@ -113,6 +125,38 @@ export function setupActions({ root, toast, rerender }) {
           rerender();
           return;
         }
+        case 'prs:import-file': {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.style.display = 'none';
+  
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      const text = await file.text();
+      const result = window.__APP__.importPRs(text);
+      
+      if (!result?.success) {
+        throw new Error(result?.error || 'Falha ao importar');
+      }
+      
+      toast(`${result.imported} PRs importados de ${file.name}`);
+      rerender();
+    } catch (err) {
+      toast(err?.message || 'Erro ao ler arquivo');
+      console.error(err);
+    } finally {
+      document.body.removeChild(input);
+    }
+  }, { once: true });
+  
+  document.body.appendChild(input);
+  input.click();
+  return;
+}
 
         case 'prs:export': {
           const result = window.__APP__.exportPRs();
@@ -132,6 +176,27 @@ export function setupActions({ root, toast, rerender }) {
           rerender();
           return;
         }
+        case 'sidebar:toggle': {
+  const sidebar = root.querySelector('#ui-sidebar');
+  if (!sidebar) return;
+
+  const isCollapsed = sidebar.classList.toggle('ui-sidebarCollapsed');
+  
+  // Salva preferência
+  const storage = window.__APP__ ? 
+    (await import('../adapters/storage/storageFactory.js')).createStorage('ui-prefs', 100) :
+    null;
+  
+  if (storage) {
+    await storage.set('sidebar-collapsed', isCollapsed);
+  }
+
+  // Atualiza ícone
+  const icon = el.querySelector('.ui-toggleIcon');
+  if (icon) icon.textContent = isCollapsed ? '▶' : '◀';
+  
+  return;
+}
 
         default:
           return;
@@ -181,20 +246,28 @@ export function setupActions({ root, toast, rerender }) {
 }
 
 function pickPdfFile() {
-  return new Promise((resolve) => {
-    let input = document.getElementById('ui-pdf-input');
-
-    if (!input) {
-      input = document.createElement('input');
-      input.id = 'ui-pdf-input';
-      input.type = 'file';
-      input.accept = 'application/pdf';
-      input.hidden = true;
-      document.body.appendChild(input);
-    }
-
-    input.value = '';
-    input.onchange = (e) => resolve(e.target.files?.[0] || null);
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/pdf';
+    input.style.display = 'none';
+    
+    const cleanup = () => {
+      document.body.removeChild(input);
+    };
+    
+    input.addEventListener('change', (e) => {
+      const file = e.target.files?.[0] || null;
+      cleanup();
+      resolve(file);
+    }, { once: true });
+    
+    input.addEventListener('cancel', () => {
+      cleanup();
+      resolve(null);
+    }, { once: true });
+    
+    document.body.appendChild(input);
     input.click();
   });
 }

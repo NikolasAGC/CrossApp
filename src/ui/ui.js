@@ -8,7 +8,7 @@ import { bindAppEvents } from './events.js';
  * - Não conhece core/store
  * - Consome apenas window.__APP__ (getState, on, actions)
  */
-export function mountUI({ root }) {
+export async function mountUI({ root }) {
   if (!root) throw new Error('mountUI: root é obrigatório');
 
   ensureStylesheet('./src/ui/styles.css');
@@ -31,32 +31,53 @@ export function mountUI({ root }) {
 
   const { toast } = ensureToast();
   const pushEventLine = createEventLog(eventsEl);
+// Restaura estado do sidebar
+const { createStorage } = await import('../adapters/storage/storageFactory.js');
+const uiPrefsStorage = createStorage('ui-prefs', 100);
+const sidebarCollapsed = await uiPrefsStorage.get('sidebar-collapsed');
 
-  const rerender = () => {
-    const state = safeGetState();
-    const view = renderAll(state);
+if (sidebarCollapsed) {
+  const sidebar = root.querySelector('#ui-sidebar');
+  if (sidebar) {
+    sidebar.classList.add('ui-sidebarCollapsed');
+    const icon = sidebar.querySelector('.ui-toggleIcon');
+    if (icon) icon.textContent = '▶';
+  }
+}
 
-    subtitleEl.textContent = view.subtitle;
-    weekBadgeEl.textContent = view.weekBadge;
-    dayBadgeEl.textContent = view.dayBadge;
+const rerender = () => {
+  const state = safeGetState();
+  const view = renderAll(state);
 
-    if (warnBadgeEl) warnBadgeEl.style.display = view.warnBadgeVisible ? '' : 'none';
+  console.log('[UI DEBUG] Atualizando DOM com:', {
+    weekChipsHtml: view.weekChipsHtml?.substring(0, 100),
+    weekChipsElExists: !!weekChipsEl
+  });
 
-    weekChipsEl.innerHTML = view.weekChipsHtml;
-    mainEl.innerHTML = view.mainHtml;
-    stateEl.innerHTML = view.stateHtml;
+  subtitleEl.textContent = view.subtitle;
+  weekBadgeEl.textContent = view.weekBadge;
+  dayBadgeEl.textContent = view.dayBadge;
 
-    if (prsTableEl) prsTableEl.innerHTML = view.prsModalHtml;
+  if (warnBadgeEl) warnBadgeEl.style.display = view.warnBadgeVisible ? '' : 'none';
 
-    if (prsCountEl) {
-      const count = Object.keys(state?.prs || {}).length;
-      prsCountEl.textContent = `${count} PRs`;
-    }
+  console.log('[UI DEBUG] Antes de atualizar weekChips, HTML atual:', weekChipsEl?.innerHTML?.substring(0, 100));
+  weekChipsEl.innerHTML = view.weekChipsHtml;
+  console.log('[UI DEBUG] Depois de atualizar weekChips, HTML novo:', weekChipsEl?.innerHTML?.substring(0, 100));
 
-    if (prsSearchEl) {
-      filterPrRows(root, prsSearchEl.value);
-    }
-  };
+  mainEl.innerHTML = view.mainHtml;
+  stateEl.innerHTML = view.stateHtml;
+
+  if (prsTableEl) prsTableEl.innerHTML = view.prsModalHtml;
+
+  if (prsCountEl) {
+    const count = Object.keys(state?.prs || {}).length;
+    prsCountEl.textContent = `${count} PRs`;
+  }
+
+  if (prsSearchEl) {
+    filterPrRows(root, prsSearchEl.value);
+  }
+};
 
   const destroyEvents = bindAppEvents({
     pushEventLine,
@@ -69,18 +90,16 @@ export function mountUI({ root }) {
   pushEventLine('UI montada');
   rerender();
 
-  return {
-    rerender,
-    destroy() {
-      try {
-        destroyEvents?.();
-      } catch (e) {
-        console.warn('destroyEvents falhou', e);
-      }
-      // Não remove stylesheet/bg/toast por padrão (para evitar pisar no host).
-    },
-  };
-}
+ return {
+  rerender,
+  destroy() {
+    try {
+      destroyEvents?.();
+    } catch (e) {
+      console.warn('destroyEvents falhou', e);
+    }
+  },
+};
 
 function safeGetState() {
   try {
@@ -166,4 +185,5 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = String(str ?? '');
   return div.innerHTML;
+}
 }

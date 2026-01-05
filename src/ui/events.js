@@ -29,6 +29,12 @@ export function bindAppEvents({ pushEventLine, rerender, toast }) {
       rerender();
     }],
 
+    ['pdf:cleared', () => {
+      pushEventLine('Todos os PDFs removidos');
+      toast('PDFs limpos');
+      rerender();
+    }],
+
     ['week:changed', (data) => {
       pushEventLine(`Semana: ${data?.weekNumber ?? '?'}`);
       rerender();

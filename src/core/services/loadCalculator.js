@@ -81,7 +81,8 @@ export function calculateLoad(exerciseName, percent, prs, options = {}) {
  * @returns {number|null} Percentual ou null se não encontrado
  */
 export function extractPercent(line) {
-  const match = line.match(/@(\d+)%/);
+  // ✅ Aceita espaço opcional entre @ e número
+  const match = line.match(/@\s*(\d+)%/);
   return match ? parseInt(match[1], 10) : null;
 }
 
@@ -114,19 +115,30 @@ export function extractExerciseName(line, prs) {
  * @param {string} line - Linha do treino (ex: "BACK SQUAT 3x5 @80%")
  * @param {Object} prs - Objeto de PRs
  * @param {Object} preferences - Preferências do usuário
+ * @param {string|null} lastExercise - Último exercício identificado (contexto)
  * @returns {Object} Resultado do processamento
  */
-export function processExerciseLine(line, prs, preferences = {}) {
+export function processExerciseLine(line, prs, preferences = {}, lastExercise = null) {
   const percent = extractPercent(line);
   
   if (!percent) {
+    // Linha sem porcentagem - pode ser definição de exercício
+    const exerciseName = extractExerciseName(line, prs);
+    
     return {
       hasPercent: false,
       originalLine: line,
+      exercise: exerciseName, // ✅ Retorna exercício identificado para usar como contexto
     };
   }
   
-  const exerciseName = extractExerciseName(line, prs);
+  // Linha com porcentagem - tenta identificar exercício na própria linha
+  let exerciseName = extractExerciseName(line, prs);
+  
+  // ✅ Se não encontrou exercício na linha, usa o último exercício (contexto)
+  if (!exerciseName && lastExercise) {
+    exerciseName = lastExercise;
+  }
   
   if (!exerciseName) {
     return {
@@ -146,6 +158,8 @@ export function processExerciseLine(line, prs, preferences = {}) {
     originalLine: line,
     exercise: exerciseName,
     percent: percent,
+    calculatedText: calculation.success ? formatLoadResult(calculation) : null, // ✅ Adiciona texto calculado
+    isWarning: calculation.warning || false, // ✅ Adiciona flag de aviso
     ...calculation,
   };
 }
@@ -177,8 +191,17 @@ export function formatLoadResult(result) {
  * @returns {Array} Array com resultados de cada linha
  */
 export function calculateWorkoutLoads(workoutLines, prs, preferences = {}) {
+  let lastExercise = null; // ✅ Mantém contexto do último exercício identificado
+  
   return workoutLines.map(line => {
-    return processExerciseLine(line, prs, preferences);
+    const result = processExerciseLine(line, prs, preferences, lastExercise);
+    
+    // ✅ Atualiza contexto se linha identificou um exercício
+    if (result.exercise) {
+      lastExercise = result.exercise;
+    }
+    
+    return result;
   });
 }
 

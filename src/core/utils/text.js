@@ -48,9 +48,30 @@ export function removeSpecialChars(str) {
  * @param {string} str - Texto
  * @returns {string} Texto em maiúsculas, sem espaços extras
  */
-export function normalizeExerciseName(str) {
-  if (typeof str !== 'string') return '';
-  return normalizeSpaces(str.toUpperCase());
+export function normalizeExerciseName(name) {
+  if (!name || typeof name !== 'string') {
+    return '';
+  }
+  
+  let normalized = name
+    .toUpperCase()
+    .trim()
+    .replace(/\s+/g, ' '); // Múltiplos espaços → um espaço
+  
+  // ✅ Normaliza variações comuns
+  normalized = normalized
+    .replace(/\bAND\b/g, '&')           // "CLEAN AND JERK" → "CLEAN & JERK"
+    .replace(/\bSQUATS?\b/g, 'SQUAT')   // "FRONT SQUATS" → "FRONT SQUAT"
+    .replace(/\bPRESSES?\b/g, 'PRESS')  // "PRESSES" → "PRESS"
+    .replace(/\bJERKS?\b/g, 'JERK')     // "JERKS" → "JERK"
+    .replace(/\bPULLS?\b/g, 'PULL')     // "PULLS" → "PULL"
+    .replace(/\bROWS?\b/g, 'ROW');      // "ROWS" → "ROW"
+  
+  // Remove "SQUAT" duplicado quando houver "SQUAT CLEAN" ou "SQUAT SNATCH"
+  // "SQUAT SQUAT CLEAN" → "SQUAT CLEAN"
+  normalized = normalized.replace(/\bSQUAT\s+SQUAT\s+/g, 'SQUAT ');
+  
+  return normalized.trim();
 }
 
 /**

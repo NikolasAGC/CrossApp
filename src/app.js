@@ -78,11 +78,7 @@ export async function init() {
     return { success: false, error: error.message };
   }
 }
-import { mountUI } from './ui/ui.js';
-mountUI({ root: document.getElementById('app') });
-/**
- * Verifica se dependências necessárias estão disponíveis
- */
+
 function checkDependencies() {
   if (!isPdfJsAvailable()) {
     console.warn('⚠️ PDF.js não disponível. Upload de PDF não funcionará.');
@@ -423,14 +419,12 @@ export async function downloadPRsTemplate() {
  * Processa treino do dia de uma semana específica
  * @param {Object} week - Semana parseada
  */
-// ✅ VERSÃO CORRETA (usa state.currentDay):
 async function processWorkoutFromWeek(week) {
   const state = getState();
   const dayName = state.currentDay;
 
   // Verifica se é domingo (descanso)
-  // AGORA USA state.currentDay em vez de isRestDay()
-  if (dayName === 'Domingo') {  // ✅ CORRETO
+  if (dayName === 'Domingo') {
     setState({
       workout: null,
       ui: { activeScreen: 'rest' },
@@ -450,23 +444,79 @@ async function processWorkoutFromWeek(week) {
     return;
   }
 
+  // ✅ CONVERTE OBJETOS {raw} → STRINGS
+  const normalizedBlocks = (workout.blocks || []).map(block => ({
+    ...block,
+    lines: (block.lines || []).map(line => {
+      if (typeof line === 'object' && line !== null && line.raw) {
+        return String(line.raw);
+      }
+      return String(line);
+    })
+  }));
+
   // Calcula cargas
   let hasWarnings = false;
-  
+  let blocksWithLoads = normalizedBlocks;
+
   const workoutForCalc = {
     day: workout.day,
-    sections: workout.blocks || [],
+    sections: normalizedBlocks,
   };
 
   try {
     const loadResult = calculateLoads(workoutForCalc, state.prs, state.preferences);
+    
+    console.log('🧮 calculateLoads result:', {
+      success: loadResult.success,
+      hasWarnings: loadResult.hasWarnings,
+      dataLength: loadResult.data?.length,
+      firstResults: loadResult.data?.slice(0, 3)
+    });
+    
     hasWarnings = loadResult.hasWarnings || false;
+
+    // ✅ APLICA CARGAS CALCULADAS DE VOLTA NAS LINHAS
+    if (loadResult.success && loadResult.data && loadResult.data.length > 0) {
+      let globalIndex = 0;
+      
+      blocksWithLoads = normalizedBlocks.map(block => {
+        const newLines = block.lines.map(line => {
+          const result = loadResult.data[globalIndex];
+          globalIndex++;
+          
+          // Se linha tem carga calculada, cria objeto com raw + calculated
+          if (result && result.calculatedText && result.calculatedText.trim()) {
+            return {
+              raw: line,
+              calculated: result.calculatedText,
+              hasWarning: result.isWarning || false
+            };
+          }
+          
+          // Se não, mantém string pura
+          return line;
+        });
+        
+        return {
+          ...block,
+          lines: newLines
+        };
+      });
+      
+      console.log('✅ Cargas aplicadas. Primeira linha processada:', blocksWithLoads[0]?.lines[1]);
+    }
+
   } catch (error) {
-    console.warn('Erro ao calcular cargas:', error);
+    console.error('❌ Erro ao calcular cargas:', error);
   }
 
+  // Salva workout com cargas calculadas
   setState({
-    workout,
+    workout: {
+      ...workout,
+      blocks: blocksWithLoads,
+    },
     ui: {
       activeScreen: 'workout',
       hasWarnings: hasWarnings,
@@ -476,7 +526,7 @@ async function processWorkoutFromWeek(week) {
   console.log(`💪 Treino carregado:`, {
     day: dayName,
     week: week.weekNumber,
-    blocks: workout.blocks?.length || 0,
+    blocks: blocksWithLoads.length,
   });
 
   emit('workout:loaded', { workout, week: week.weekNumber });
@@ -528,7 +578,6 @@ export async function handleMultiWeekPdfUpload(file) {
     };
   }
 }
-
 /**
  * Copiar treino
  * @returns {Promise<Object>}
@@ -544,10 +593,21 @@ export async function handleCopyWorkout() {
   }
 
   try {
+    // ✅ GARANTE QUE LINHAS SÃO STRINGS
+    const sectionsForCopy = (state.workout.blocks || []).map(block => ({
+      ...block,
+      lines: (block.lines || []).map(line => {
+        if (typeof line === 'object' && line !== null) {
+          return String(line.raw || line.text || '');
+        }
+        return String(line);
+      })
+    }));
+
     // Adapta estrutura: workout tem blocks, copyWorkout espera sections
     const workoutForCopy = {
       day: state.workout.day,
-      sections: state.workout.blocks || [],
+      sections: sectionsForCopy,
     };
 
     const result = copyWorkout(workoutForCopy, state.prs, state.preferences);
@@ -571,6 +631,8 @@ export async function handleCopyWorkout() {
     };
   }
 }
+
+
 
 /**
  * Exportar treino
@@ -777,6 +839,7 @@ function exposeDebugAPIs() {
 
     // PDF Multi-week
     uploadMultiWeekPdf: handleMultiWeekPdfUpload,
+    clearAllPdfs,
     selectWeek: selectActiveWeek,
     getWeeks: () => getState().weeks,
     getActiveWeek: () => getState().activeWeekNumber,
@@ -813,10 +876,44 @@ function exposeDebugAPIs() {
 
   console.log('🐛 Debug APIs expostas: window.__APP__');
 }
+/**
+ * Limpa todos os PDFs salvos
+ */
+/**
+ * Limpa todos os PDFs salvos
+ */
+async function clearAllPdfs() {
+  try {
+    console.log('🗑️ Limpando todos os PDFs...');
 
+    const { clearAllPdfs: clearPdfs } = await import('./adapters/pdf/pdfRepository.js');
+    const result = await clearPdfs();
 
+    if (!result.success) {
+      console.error(`❌ Erro ao limpar PDFs: ${result.error}`);
+      return { success: false, error: result.error };
+    }
 
+    // Reseta state
+    setState({ 
+      weeks: [], 
+      activeWeekNumber: null, 
+      workout: null,
+      ui: { activeScreen: 'welcome' }
+    });
 
+    // Limpa storage de semana ativa
+    await activeWeekStorage.remove('active-week');
+
+    emit('pdf:cleared');
+    console.log('✅ Todos os PDFs removidos');
+
+    return { success: true };
+  } catch (error) {
+    console.error(`❌ Erro ao limpar PDFs: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
 // ========== HELPERS ==========
 
 /**

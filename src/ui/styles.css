@@ -145,6 +145,7 @@
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  min-height: 40px;
 }
 
 .ui-chip {
@@ -156,10 +157,11 @@
   cursor: pointer;
   user-select: none;
   font-size: 13px;
-  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .ui-chip:hover { transform: translateY(-1px); }
+
 .ui-chip[aria-pressed="true"] {
   border-color: rgba(125, 211, 252, 0.55);
   background: rgba(125, 211, 252, 0.14);
@@ -252,7 +254,6 @@
 }
 
 .ui-calcWarn { color: rgba(251, 191, 36, 0.95); }
-
 .ui-muted { color: var(--muted); }
 
 /* Toast */
@@ -396,4 +397,81 @@
   max-height: 52vh;
   overflow: auto;
   border-radius: 12px;
+}
+/* Sidebar Toggle */
+.ui-sidebarToggle {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 6px 0 0 6px;
+  color: rgba(148, 163, 184, 0.9);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.ui-sidebarToggle:hover {
+  background: rgba(51, 65, 85, 0.95);
+  color: rgba(226, 232, 240, 1);
+  transform: translateY(-50%) translateX(-2px);
+}
+
+.ui-toggleIcon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ui-panel {
+  position: relative;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.ui-sidebarCollapsed {
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ui-sidebarCollapsed .ui-sidebarToggle {
+  left: auto;
+  right: calc(100% - 12px);
+  border-radius: 0 6px 6px 0;
+}
+
+.ui-sidebarContent {
+  transition: opacity 0.3s ease;
+}
+
+.ui-sidebarCollapsed .ui-sidebarContent {
+  opacity: 0;
+}
+/* Header Fixo Absoluto */
+.ui-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.98);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+/* Compensa o espaço do header fixo */
+.ui-grid {
+  margin-top: 280px; /* Ajuste se necessário */
+}
+
+
+/* Scroll suave */
+html {
+  scroll-behavior: smooth;
 }

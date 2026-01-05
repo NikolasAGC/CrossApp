@@ -17,89 +17,77 @@ const METADATA_KEY = 'workout-pdf-metadata';
  * @returns {Promise<Object>} Resultado
  */
 export async function savePdf(file) {
-  // Valida arquivo
   const validation = validatePdfFile(file);
-  
   if (!validation.valid) {
-    return {
-      success: false,
-      error: validation.error,
-    };
+    return { success: false, error: validation.error };
   }
-  
+
   try {
-    // Extrai texto
     const rawText = await extractTextFromFile(file);
-    
     if (!rawText || rawText.length < 50) {
-      return {
-        success: false,
-        error: 'PDF vazio ou com muito pouco texto',
-      };
+      return { success: false, error: 'PDF vazio ou com muito pouco texto' };
     }
-    
-    // Limpa texto
+
     const cleanedText = cleanPdfText(rawText);
-    
-    // Valida conteúdo
-    const contentValidation = validateWorkoutText(cleanedText);
-    
-    if (!contentValidation.valid) {
-      return {
-        success: false,
-        error: contentValidation.error,
-        suggestions: contentValidation.suggestions,
-      };
+    const parsedWeeks = parseMultiWeekPdf(cleanedText);
+
+    console.log('📦 Semanas parseadas do PDF:', parsedWeeks.map(w => w.weekNumber));
+
+    if (!parsedWeeks || parsedWeeks.length === 0) {
+      return { success: false, error: 'Nenhuma semana detectada no PDF' };
     }
+
+    // 🔥 CARREGA SEMANAS EXISTENTES
+    const existingResult = await loadPdf();
+    const existingWeeks = existingResult.success ? (existingResult.data?.weeks || []) : [];
+
+    console.log('📦 Semanas existentes:', existingWeeks.map(w => w.weekNumber));
+
+    // 🔥 MESCLA (acumula sem duplicar)
+    const allWeeksMap = new Map();
     
-    // Extrai metadados (opcional, não bloqueia se falhar)
-    let metadata = null;
-    try {
-      metadata = await extractMetadata(file);
-    } catch {
-      // Ignora erro de metadata
-    }
-    
-    // Escolhe storage apropriado baseado em tamanho
-    const storage = createStorage(PDF_KEY, cleanedText.length);
-    
-    // Salva texto
-    await storage.set(PDF_KEY, cleanedText);
-    
-    // Salva metadados
-    const metadataToSave = {
+    // Adiciona existentes
+    existingWeeks.forEach(w => {
+      if (w.weekNumber) allWeeksMap.set(w.weekNumber, w);
+    });
+
+    // Adiciona novas (sobrescreve se já existir)
+    parsedWeeks.forEach(w => {
+      if (w.weekNumber) allWeeksMap.set(w.weekNumber, w);
+    });
+
+    const mergedWeeks = Array.from(allWeeksMap.values())
+      .sort((a, b) => Number(a.weekNumber) - Number(b.weekNumber));
+
+    console.log('📦 Semanas após merge:', mergedWeeks.map(w => w.weekNumber));
+
+    // Salva todas as semanas
+    const storage = createStorage(PDF_KEY, JSON.stringify(mergedWeeks).length);
+    await storage.set(PDF_KEY, JSON.stringify(mergedWeeks));
+
+    // Atualiza metadados
+    const metadata = {
       uploadedAt: getTimestamp(),
       fileName: file.name,
       fileSize: file.size,
-      textLength: cleanedText.length,
-      format: contentValidation.format,
-      pdfMetadata: metadata,
+      weeksCount: mergedWeeks.length,
+      weekNumbers: mergedWeeks.map(w => w.weekNumber),
     };
-    
+
     const metaStorage = createStorage(METADATA_KEY, 1000);
-    await metaStorage.set(METADATA_KEY, metadataToSave);
-    
-    console.log('✅ PDF salvo:', {
-      file: file.name,
-      size: validation.sizeFormatted,
-      textLength: cleanedText.length,
-      storage: storage.getInfo().name,
+    await metaStorage.set(METADATA_KEY, metadata);
+
+    console.log('✅ PDF salvo com acúmulo:', { 
+      novas: parsedWeeks.length, 
+      total: mergedWeeks.length 
     });
-    
-    return {
-      success: true,
-      data: {
-        text: cleanedText,
-        metadata: metadataToSave,
-      },
-      storageName: storage.getInfo().name,
+
+    return { 
+      success: true, 
+      data: { weeks: mergedWeeks, metadata } 
     };
-    
   } catch (error) {
-    return {
-      success: false,
-      error: 'Erro ao processar PDF: ' + error.message,
-    };
+    return { success: false, error: `Erro ao processar PDF: ${error.message}` };
   }
 }
 
@@ -109,39 +97,37 @@ export async function savePdf(file) {
  */
 export async function loadPdf() {
   try {
-    // Tenta localStorage primeiro (mais rápido)
     const storage = createStorage(PDF_KEY, 0);
-    const text = await storage.get(PDF_KEY);
-    
-    if (!text) {
-      return {
-        success: false,
-        error: 'Nenhum PDF salvo',
-        data: null,
-      };
+    const data = await storage.get(PDF_KEY);
+
+    if (!data) {
+      return { success: false, error: 'Nenhum PDF salvo', data: null };
     }
-    
-    // Carrega metadados
+
+    const weeks = JSON.parse(data);
     const metaStorage = createStorage(METADATA_KEY, 0);
     const metadata = await metaStorage.get(METADATA_KEY);
-    
-    return {
-      success: true,
-      data: {
-        text: text,
-        metadata: metadata || null,
-      },
-    };
-    
+
+    return { success: true, data: { weeks, metadata } };
   } catch (error) {
-    return {
-      success: false,
-      error: 'Erro ao carregar PDF: ' + error.message,
-      data: null,
-    };
+    return { success: false, error: `Erro ao carregar PDF: ${error.message}`, data: null };
   }
 }
+export async function clearAllPdfs() {
+  try {
+    const storage = createStorage(PDF_KEY, 0);
+    await storage.remove(PDF_KEY);
 
+    const metaStorage = createStorage(METADATA_KEY, 0);
+    await metaStorage.remove(METADATA_KEY);
+
+    console.log('🗑️ Todos os PDFs removidos');
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Erro ao limpar PDFs:', error);
+    return { success: false, error: error.message };
+  }
+}
 /**
  * Verifica se há PDF salvo
  * @returns {Promise<boolean>}
@@ -234,189 +220,139 @@ import { parseMultiWeekPdf, validateCustomPdfFormat, detectWeekNumbers } from '.
  * @param {File} file - Arquivo PDF
  * @returns {Promise<Object>}
  */
+/**
+ * Salva PDF multi-semana COM ACÚMULO
+ */
 export async function saveMultiWeekPdf(file) {
   const validation = validatePdfFile(file);
-  
   if (!validation.valid) {
-    return {
-      success: false,
-      error: validation.error,
-    };
+    return { success: false, error: validation.error };
   }
-  
+
   try {
     const rawText = await extractTextFromFile(file);
-    
+    if (!rawText || rawText.length < 50) {
+      return { success: false, error: 'PDF vazio ou com muito pouco texto' };
+    }
+
     console.log('📝 Texto bruto extraído:', rawText.length, 'chars');
     console.log('📝 Primeiros 200 chars:', rawText.substring(0, 200));
-    
-    if (!rawText || rawText.length < 50) {
-      return {
-        success: false,
-        error: 'PDF vazio ou com muito pouco texto',
-      };
-    }
-    
+
     const cleanedText = cleanPdfText(rawText);
-    
     console.log('🧹 Texto limpo:', cleanedText.length, 'chars');
     console.log('🧹 Primeiros 200 chars:', cleanedText.substring(0, 200));
-    
-    // VERIFICAÇÃO CRÍTICA
-    if (!cleanedText || cleanedText.length < 50) {
-      console.error('❌ cleanPdfText retornou vazio!');
-      console.error('Texto bruto tinha:', rawText.length, 'chars');
-      
-      // FALLBACK: usa texto bruto se limpeza falhar
-      console.warn('⚠️ Usando texto bruto (pulando limpeza)');
-      const textToUse = rawText;
-      
-      // Valida formato específico
-      const formatValidation = validateCustomPdfFormat(textToUse);
-      
-      if (!formatValidation.valid) {
-        return {
-          success: false,
-          error: formatValidation.error,
-        };
-      }
-      
-      // Parse de múltiplas semanas
-      const parsedWeeks = parseMultiWeekPdf(textToUse);
-      
-      console.log('📦 Semanas parseadas:', parsedWeeks.length);
-      
-      // Escolhe storage apropriado
-      const storage = createStorage('multi-week-pdf', textToUse.length);
-      
-      // Salva texto bruto
-      await storage.set('multi-week-pdf-text', textToUse);
-      
-      // Salva semanas parseadas
-      await storage.set('multi-week-pdf-parsed', parsedWeeks);
-      
-      // Salva metadados
-      const metadata = {
-        uploadedAt: getTimestamp(),
-        fileName: file.name,
-        fileSize: file.size,
-        textLength: textToUse.length,
-        weekNumbers: formatValidation.weekNumbers,
-        weeksCount: formatValidation.weeksCount,
-      };
-      
-      const metaStorage = createStorage('multi-week-metadata', 1000);
-      await metaStorage.set('multi-week-metadata', metadata);
-      
-      console.log('✅ PDF multi-semana salvo:', {
-        file: file.name,
-        weeks: formatValidation.weekNumbers,
-        storage: storage.getInfo().name,
-      });
-      
-      return {
-        success: true,
-        data: {
-          text: textToUse,
-          parsedWeeks: parsedWeeks,
-          metadata: metadata,
-        },
-      };
-    }
-    
-    // Valida formato específico
-    const formatValidation = validateCustomPdfFormat(cleanedText);
-    
-    if (!formatValidation.valid) {
-      return {
-        success: false,
-        error: formatValidation.error,
-      };
-    }
-    
-    // Parse de múltiplas semanas
+
     const parsedWeeks = parseMultiWeekPdf(cleanedText);
+
+    if (!parsedWeeks || parsedWeeks.length === 0) {
+      return { success: false, error: 'Nenhuma semana detectada no PDF' };
+    }
+
+    console.log('📦 Semanas parseadas do novo PDF:', parsedWeeks.map(w => w.weekNumber));
+
+    // 🔥 CARREGA SEMANAS EXISTENTES
+    const existingResult = await loadParsedWeeks();
+    const existingWeeks = existingResult.success ? (existingResult.data?.weeks || []) : [];
+
+    console.log('📦 Semanas já salvas:', existingWeeks.map(w => w.weekNumber));
+
+    // 🔥 MESCLA (acumula sem duplicar)
+    const allWeeksMap = new Map();
     
-    // Escolhe storage apropriado
-    const storage = createStorage('multi-week-pdf', cleanedText.length);
-    
-    // Salva texto bruto
-    await storage.set('multi-week-pdf-text', cleanedText);
-    
-    // Salva semanas parseadas
-    await storage.set('multi-week-pdf-parsed', parsedWeeks);
-    
-    // Salva metadados
+    // Adiciona existentes primeiro
+    existingWeeks.forEach(w => {
+      if (w.weekNumber) allWeeksMap.set(w.weekNumber, w);
+    });
+
+    // Adiciona/sobrescreve com novas
+    parsedWeeks.forEach(w => {
+      if (w.weekNumber) allWeeksMap.set(w.weekNumber, w);
+    });
+
+    const mergedWeeks = Array.from(allWeeksMap.values())
+      .sort((a, b) => Number(a.weekNumber) - Number(b.weekNumber));
+
+    console.log('📦 Semanas após merge:', mergedWeeks.map(w => w.weekNumber));
+
+    // Salva TODAS as semanas
+    // Salva TODAS as semanas (linha ~277)
+const storage = createStorage(PDF_KEY, JSON.stringify(mergedWeeks).length);
+await storage.set(PDF_KEY, mergedWeeks);  // ← SEM JSON.stringify!
+
+    // Atualiza metadados
     const metadata = {
       uploadedAt: getTimestamp(),
       fileName: file.name,
       fileSize: file.size,
-      textLength: cleanedText.length,
-      weekNumbers: formatValidation.weekNumbers,
-      weeksCount: formatValidation.weeksCount,
+      weeksCount: mergedWeeks.length,
+      weekNumbers: mergedWeeks.map(w => w.weekNumber),
     };
-    
-    const metaStorage = createStorage('multi-week-metadata', 1000);
-    await metaStorage.set('multi-week-metadata', metadata);
-    
-    console.log('✅ PDF multi-semana salvo:', {
-      file: file.name,
-      weeks: formatValidation.weekNumbers,
-      storage: storage.getInfo().name,
+
+    const metaStorage = createStorage(METADATA_KEY, 1000);
+    await metaStorage.set(METADATA_KEY, metadata);
+
+    console.log('✅ PDF multi-semana salvo:', { 
+      novas: parsedWeeks.length, 
+      totalAgora: mergedWeeks.length 
     });
-    
-    return {
-      success: true,
-      data: {
-        text: cleanedText,
-        parsedWeeks: parsedWeeks,
-        metadata: metadata,
-      },
+
+    return { 
+      success: true, 
+      data: { 
+        parsedWeeks: mergedWeeks,
+        metadata 
+      } 
     };
-    
   } catch (error) {
-    console.error('❌ Erro completo:', error);
-    return {
-      success: false,
-      error: 'Erro ao processar PDF: ' + error.message,
-    };
+    return { success: false, error: `Erro ao processar PDF: ${error.message}` };
   }
 }
+
 
 
 /**
  * Carrega semanas parseadas
  * @returns {Promise<Object>}
  */
+/**
+ * Carrega todas as semanas salvas
+ */
+/**
+ * Carrega todas as semanas salvas
+ */
 export async function loadParsedWeeks() {
   try {
-    const storage = createStorage('multi-week-pdf-parsed', 0);
-    const parsedWeeks = await storage.get('multi-week-pdf-parsed');
-    
-    if (!parsedWeeks) {
-      return {
-        success: false,
-        error: 'Nenhuma semana salva',
-        data: null,
-      };
+    const storage = createStorage(PDF_KEY, 0);
+    const data = await storage.get(PDF_KEY);
+
+    if (!data) {
+      return { success: false, error: 'Nenhum PDF salvo', data: null };
     }
-    
-    const metaStorage = createStorage('multi-week-metadata', 0);
-    const metadata = await metaStorage.get('multi-week-metadata');
-    
-    return {
-      success: true,
-      data: {
-        weeks: parsedWeeks,
-        metadata: metadata || null,
-      },
-    };
-    
+
+    // 🔥 CORREÇÃO: storage.get() JÁ RETORNA OBJETO PARSEADO
+    let weeks;
+    if (typeof data === 'string') {
+      weeks = JSON.parse(data);
+    } else if (Array.isArray(data)) {
+      weeks = data;
+    } else {
+      console.warn('⚠️ Formato inesperado:', typeof data, data);
+      return { success: false, error: 'Formato inválido', data: null };
+    }
+
+    if (!Array.isArray(weeks)) {
+      console.warn('⚠️ Semanas não é array:', weeks);
+      return { success: false, error: 'Formato inválido', data: null };
+    }
+
+    const metaStorage = createStorage(METADATA_KEY, 0);
+    const metadata = await metaStorage.get(METADATA_KEY);
+
+    console.log('📦 loadParsedWeeks retornou:', weeks.map(w => w.weekNumber));
+
+    return { success: true, data: { weeks, metadata } };
   } catch (error) {
-    return {
-      success: false,
-      error: 'Erro ao carregar semanas: ' + error.message,
-      data: null,
-    };
+    console.error('❌ Erro ao carregar semanas:', error);
+    return { success: false, error: `Erro ao carregar: ${error.message}`, data: null };
   }
 }
