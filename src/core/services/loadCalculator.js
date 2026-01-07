@@ -7,6 +7,7 @@ import { calculatePercent, kgToLbs, roundToNearest, formatNumber } from '../util
 import { isValidPR, isValidPercent } from '../utils/validators.js';
 import { normalizeExerciseName, extractNumbers } from '../utils/text.js';
 import { getPR } from './prsService.js';
+import { trackExerciseContext, resolveExerciseWithContext } from '../../plugins/exercise-context-tracker.js'; // ✅ ADICIONAR ESTA LINHA
 
 /**
  * Calcula carga baseada em PR e percentual
@@ -128,17 +129,12 @@ export function processExerciseLine(line, prs, preferences = {}, lastExercise = 
     return {
       hasPercent: false,
       originalLine: line,
-      exercise: exerciseName, // ✅ Retorna exercício identificado para usar como contexto
+      exercise: exerciseName,
     };
   }
   
-  // Linha com porcentagem - tenta identificar exercício na própria linha
-  let exerciseName = extractExerciseName(line, prs);
-  
-  // ✅ Se não encontrou exercício na linha, usa o último exercício (contexto)
-  if (!exerciseName && lastExercise) {
-    exerciseName = lastExercise;
-  }
+  // ✅ USA PLUGIN PARA RESOLVER EXERCÍCIO COM CONTEXTO
+  const exerciseName = resolveExerciseWithContext(line, lastExercise, prs);
   
   if (!exerciseName) {
     return {
@@ -158,8 +154,8 @@ export function processExerciseLine(line, prs, preferences = {}, lastExercise = 
     originalLine: line,
     exercise: exerciseName,
     percent: percent,
-    calculatedText: calculation.success ? formatLoadResult(calculation) : null, // ✅ Adiciona texto calculado
-    isWarning: calculation.warning || false, // ✅ Adiciona flag de aviso
+    calculatedText: calculation.success ? formatLoadResult(calculation) : null,
+    isWarning: calculation.warning || false,
     ...calculation,
   };
 }
@@ -191,17 +187,11 @@ export function formatLoadResult(result) {
  * @returns {Array} Array com resultados de cada linha
  */
 export function calculateWorkoutLoads(workoutLines, prs, preferences = {}) {
-  let lastExercise = null; // ✅ Mantém contexto do último exercício identificado
+  // ✅ USA PLUGIN PARA RASTREAR CONTEXTO
+  const linesWithContext = trackExerciseContext(workoutLines, prs);
   
-  return workoutLines.map(line => {
-    const result = processExerciseLine(line, prs, preferences, lastExercise);
-    
-    // ✅ Atualiza contexto se linha identificou um exercício
-    if (result.exercise) {
-      lastExercise = result.exercise;
-    }
-    
-    return result;
+  return linesWithContext.map(({ line, contextExercise }) => {
+    return processExerciseLine(line, prs, preferences, contextExercise);
   });
 }
 
