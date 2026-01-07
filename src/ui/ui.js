@@ -41,7 +41,6 @@ export async function mountUI({ root }) {
   };
 
   const refs = getRefs(root);
-  const pushEventLine = createEventLog(refs.events);
 
   const rerender = async () => {
     const state = safeGetState();
@@ -67,7 +66,6 @@ export async function mountUI({ root }) {
   };
 
   const destroyEvents = bindAppEvents({
-    pushEventLine,
     rerender: () => rerender(),
     toast,
     setBusy,
@@ -84,7 +82,6 @@ export async function mountUI({ root }) {
 
   // Primeira renderização: some com loading inicial
   setBusy(false);
-  pushEventLine('UI montada');
   await rerender();
 
   return {
